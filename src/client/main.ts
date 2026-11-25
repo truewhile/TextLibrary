@@ -96,25 +96,39 @@ function createThemeToggle(): HTMLElement {
     ariaLabel: "外观主题",
   });
 
+  const buttons = new Map<ThemePreference, HTMLButtonElement>();
+
   const paint = () => {
     const pref = getThemePreference();
-    host.replaceChildren(
-      ...THEME_OPTIONS.map((option) =>
-        el(
-          "button",
-          {
-            type: "button",
-            class: `theme-toggle-btn${pref === option.id ? " active" : ""}`,
-            role: "radio",
-            ariaChecked: pref === option.id ? "true" : "false",
-            title: option.title,
-            onclick: () => setThemePreference(option.id as ThemePreference),
-          },
-          [option.label],
-        ),
-      ),
-    );
+    const resolvedLabel = getResolvedTheme() === "dark" ? "夜晚" : "日间";
+    for (const option of THEME_OPTIONS) {
+      const button = buttons.get(option.id);
+      if (!button) continue;
+      const active = pref === option.id;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-checked", active ? "true" : "false");
+      button.title =
+        option.id === "system" ? `${option.title}（当前：${resolvedLabel}）` : option.title;
+    }
   };
+
+  for (const option of THEME_OPTIONS) {
+    const icon = el("span", { class: "theme-toggle-icon" }, [option.icon]);
+    icon.setAttribute("aria-hidden", "true");
+    const button = el(
+      "button",
+      {
+        type: "button",
+        class: "theme-toggle-btn",
+        role: "radio",
+        title: option.title,
+        onclick: () => setThemePreference(option.id),
+      },
+      [icon, el("span", {}, [option.label])],
+    );
+    buttons.set(option.id, button);
+    host.append(button);
+  }
 
   paint();
   const stop = onThemeChange(() => {

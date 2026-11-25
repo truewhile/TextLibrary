@@ -49,6 +49,9 @@ function editorThemeExtension(theme: ResolvedTheme): Extension {
         "&": { backgroundColor: "transparent" },
         ".cm-content": { caretColor: "#7fa8ff" },
         ".cm-tooltip": { border: "1px solid #2f3746", backgroundColor: "#171b24" },
+        ".cm-panels": { backgroundColor: "#171b24", color: "#e7eaf0" },
+        ".cm-searchMatch": { backgroundColor: "rgba(77, 141, 255, 0.28)" },
+        ".cm-selectionMatch": { backgroundColor: "rgba(77, 141, 255, 0.18)" },
       }),
     ];
   }
@@ -61,8 +64,12 @@ function editorThemeExtension(theme: ResolvedTheme): Extension {
     },
     ".cm-activeLine": { backgroundColor: "rgba(26, 34, 48, 0.05)" },
     ".cm-activeLineGutter": { backgroundColor: "rgba(26, 34, 48, 0.05)" },
-    ".cm-gutters": { backgroundColor: "transparent", color: "#8490a3", border: "none" },
+    ".cm-gutters": { backgroundColor: "transparent", color: "#647084", border: "none" },
     ".cm-tooltip": { border: "1px solid #c8d0dc", backgroundColor: "#ffffff", color: "#1a2230" },
+    ".cm-panels": { backgroundColor: "#e9edf4", color: "#1a2230" },
+    ".cm-searchMatch": { backgroundColor: "rgba(59, 122, 239, 0.2)" },
+    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "rgba(59, 122, 239, 0.35)" },
+    ".cm-selectionMatch": { backgroundColor: "rgba(59, 122, 239, 0.14)" },
   });
 }
 

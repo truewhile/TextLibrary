@@ -3,10 +3,10 @@ export type ResolvedTheme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "cfnode.theme";
 
-export const THEME_OPTIONS: { id: ThemePreference; label: string; title: string }[] = [
-  { id: "light", label: "日间", title: "日间模式" },
-  { id: "dark", label: "夜晚", title: "夜晚模式" },
-  { id: "system", label: "系统", title: "跟随系统" },
+export const THEME_OPTIONS: { id: ThemePreference; label: string; title: string; icon: string }[] = [
+  { id: "light", label: "日间", title: "日间模式", icon: "☀" },
+  { id: "dark", label: "夜晚", title: "夜晚模式", icon: "☾" },
+  { id: "system", label: "系统", title: "跟随系统", icon: "◐" },
 ];
 
 type ThemeListener = (resolved: ResolvedTheme, preference: ThemePreference) => void;
