@@ -1,1 +1,12 @@
-ADMIN_TOKEN=replace-with-a-long-random-string
+# 必填：所有 /api/* 的 Bearer 令牌
+ADMIN_TOKEN=password
+
+# 以下均为可选，留空或注释掉即使用默认值
+# 单条正文上限，支持字节数或 10MiB / 512KB 这样的写法，默认 10MiB
+#MAX_BODY=10MiB
+# 每个条目保留的历史版本数，默认 20
+#MAX_REVISIONS=20
+# GET /api/items 最多返回的条目数，默认 5000
+#LIST_PAGE_LIMIT=5000
+# 单次分组重命名最多处理的条目数，默认 500
+#GROUP_MOVE_LIMIT=500

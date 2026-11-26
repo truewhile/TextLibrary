@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "cfnode",
+  "name": "textlibrary",
   "main": "src/worker.ts",
   "compatibility_date": "2026-11-01",
   "assets": {
@@ -12,10 +12,17 @@
   "r2_buckets": [
     {
       "binding": "BUCKET",
-      "bucket_name": "cfnode-store"
+      "bucket_name": "textlibrary-store"
     }
   ],
   "observability": {
     "enabled": true
-  }
+  },
+  // 可选限额，取消注释即覆盖默认值；也可用 wrangler secret / 仪表盘变量设置。
+  // "vars": {
+  //   "MAX_BODY": "10MiB",
+  //   "MAX_REVISIONS": "20",
+  //   "LIST_PAGE_LIMIT": "5000",
+  //   "GROUP_MOVE_LIMIT": "500"
+  // }
 }

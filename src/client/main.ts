@@ -19,7 +19,7 @@ import {
 
 const DOC_LANGS = ["markdown", "text", "json", "yaml"];
 const SCRIPT_LANGS = ["javascript", "typescript", "shell", "python", "powershell", "text"];
-const MD_VIEW_STORAGE_KEY = "cfnode.mdViewMode";
+const MD_VIEW_STORAGE_KEY = "textlibrary.mdViewMode";
 
 initTheme();
 
@@ -41,6 +41,7 @@ type AppState = {
   collapsedGroups: Set<string>;
   loading: boolean;
   truncated: boolean;
+  listLimit: number;
 };
 
 const state: AppState = {
@@ -55,6 +56,7 @@ const state: AppState = {
   collapsedGroups: new Set(),
   loading: false,
   truncated: false,
+  listLimit: 5000,
 };
 
 const root = document.querySelector<HTMLDivElement>("#app")!;
@@ -210,7 +212,7 @@ function renderGate(message?: string) {
     el("div", { class: "gate" }, [
       el("div", { class: "gate-card" }, [
         el("div", { class: "gate-theme" }, [createThemeToggle()]),
-        el("h1", {}, ["CFNode"]),
+        el("h1", {}, ["TextLibrary"]),
         el("p", {}, ["存放脚本与文档的 Cloudflare Worker。输入管理令牌以解锁编辑器。"]),
         form,
         message ? el("div", { class: "modal-error", style: "margin:14px 0 0" }, [message]) : null,
@@ -337,7 +339,7 @@ function renderShell() {
         el("div", { class: "brand" }, [
           el("div", { class: "brand-mark" }, ["⚡"]),
           el("div", {}, [
-            el("div", { class: "brand-title" }, ["CFNode"]),
+            el("div", { class: "brand-title" }, ["TextLibrary"]),
             el("div", { class: "brand-sub" }, ["脚本与文档库"]),
           ]),
         ]),
@@ -644,7 +646,11 @@ function renderList() {
   }
 
   if (state.truncated) {
-    children.push(el("div", { class: "empty-hint" }, ["条目过多，仅显示前 5000 条。请用搜索缩小范围。"]));
+    children.push(
+      el("div", { class: "empty-hint" }, [
+        `条目过多，仅显示前 ${state.listLimit} 条。请用搜索缩小范围。`,
+      ]),
+    );
   }
 
   listHost.replaceChildren(...children);
@@ -689,7 +695,7 @@ function renderStatus() {
 function markDirty() {
   state.saveState = "dirty";
   renderStatus();
-  document.title = "● CFNode · 脚本与文档";
+  document.title = "● TextLibrary · 脚本与文档";
 }
 
 function updateDownloadHref() {
@@ -736,9 +742,10 @@ async function renameGroup(from: string) {
 
   try {
     const { moved } = await api.renameGroup(from, parsed.value);
-    const { items, truncated } = await api.list();
+    const { items, truncated, limit } = await api.list();
     state.items = items;
     state.truncated = truncated;
+    state.listLimit = limit;
     state.collapsedGroups.delete(from);
     if (state.active && !state.draft) {
       const refreshed = items.find((item) => item.slug === state.active!.slug);
@@ -763,9 +770,10 @@ async function boot() {
   state.loading = true;
   renderShell();
   try {
-    const { items, truncated } = await api.list();
+    const { items, truncated, limit } = await api.list();
     state.items = items;
     state.truncated = truncated;
+    state.listLimit = limit;
     state.loading = false;
     renderTagFilter();
     renderList();
@@ -832,7 +840,7 @@ async function selectItem(slug: string, initial = false) {
     syncTopbar();
     renderTagFilter();
     renderList();
-    document.title = `${item.title} · CFNode`;
+    document.title = `${item.title} · TextLibrary`;
   } catch (error) {
     toast("读取失败：" + (error as Error).message, "err");
     if (state.items.length && initial) {
@@ -912,7 +920,7 @@ async function save(): Promise<boolean> {
     syncTopbar();
     renderTagFilter();
     renderList();
-    document.title = `${meta.title} · CFNode`;
+    document.title = `${meta.title} · TextLibrary`;
     toast("已保存", "ok");
     return true;
   } catch (error) {
@@ -942,7 +950,7 @@ async function removeActive() {
     setEnabled(false);
     syncTopbar();
     renderList();
-    document.title = "CFNode · 脚本与文档";
+    document.title = "TextLibrary · 脚本与文档";
     return;
   }
 
@@ -966,7 +974,7 @@ async function removeActive() {
       state.saveState = "clean";
       syncTopbar();
       renderList();
-      document.title = "CFNode · 脚本与文档";
+      document.title = "TextLibrary · 脚本与文档";
     }
     toast("已删除", "ok");
   } catch (error) {

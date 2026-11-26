@@ -43,7 +43,7 @@ export class ApiError extends Error {
   }
 }
 
-const TOKEN_KEY = "cfnode.token";
+const TOKEN_KEY = "textlibrary.token";
 
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? "";
@@ -77,7 +77,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   ping: () => request<{ ok: boolean }>("/api/ping"),
-  list: () => request<{ items: ItemMeta[]; truncated: boolean }>("/api/items"),
+  list: () => request<{ items: ItemMeta[]; truncated: boolean; limit: number }>("/api/items"),
   get: (slug: string) => request<Item>(`/api/items/${encodeURIComponent(slug)}`),
   save: (
     slug: string,

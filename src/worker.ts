@@ -17,7 +17,75 @@ type Env = {
   BUCKET: R2Bucket;
   ASSETS: Fetcher;
   ADMIN_TOKEN: string;
+  MAX_BODY?: string;
+  MAX_REVISIONS?: string;
+  LIST_PAGE_LIMIT?: string;
+  GROUP_MOVE_LIMIT?: string;
 };
+
+/**
+ * Every tunable below falls back to its default when the variable is absent or
+ * unparsable, so an existing deployment keeps working without new config.
+ */
+const DEFAULT_MAX_BODY = 10 * 1024 * 1024;
+const DEFAULT_MAX_REVISIONS = 20;
+const DEFAULT_LIST_PAGE_LIMIT = 5000;
+const DEFAULT_GROUP_MOVE_LIMIT = 500;
+
+const SIZE_RE = /^(\d+(?:\.\d+)?)\s*(b|kb|kib|mb|mib|gb|gib)?$/i;
+
+const SIZE_UNITS: Record<string, number> = {
+  b: 1,
+  kb: 1000,
+  kib: 1024,
+  mb: 1000 * 1000,
+  mib: 1024 * 1024,
+  gb: 1000 * 1000 * 1000,
+  gib: 1024 * 1024 * 1024,
+};
+
+/** Accepts plain bytes (`10485760`) or a suffixed size (`10MiB`, `512KB`). */
+function readSize(raw: string | undefined, fallback: number): number {
+  const text = raw?.trim();
+  if (!text) return fallback;
+  const match = SIZE_RE.exec(text);
+  if (!match) return fallback;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  const scale = SIZE_UNITS[(match[2] ?? "b").toLowerCase()] ?? 1;
+  const bytes = Math.floor(value * scale);
+  return bytes > 0 ? bytes : fallback;
+}
+
+function readCount(raw: string | undefined, fallback: number): number {
+  const text = raw?.trim();
+  if (!text || !/^\d+$/.test(text)) return fallback;
+  const value = Number(text);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+type Limits = {
+  maxBody: number;
+  maxRevisions: number;
+  listPageLimit: number;
+  groupMoveLimit: number;
+};
+
+function limitsFromEnv(env: Env): Limits {
+  return {
+    maxBody: readSize(env.MAX_BODY, DEFAULT_MAX_BODY),
+    maxRevisions: readCount(env.MAX_REVISIONS, DEFAULT_MAX_REVISIONS),
+    listPageLimit: readCount(env.LIST_PAGE_LIMIT, DEFAULT_LIST_PAGE_LIMIT),
+    groupMoveLimit: readCount(env.GROUP_MOVE_LIMIT, DEFAULT_GROUP_MOVE_LIMIT),
+  };
+}
+
+/** Renders a byte count the way the limit is usually configured (10 MiB, 512 KB). */
+function formatLimit(bytes: number): string {
+  if (bytes % (1024 * 1024) === 0) return `${bytes / (1024 * 1024)} MiB`;
+  if (bytes % 1024 === 0) return `${bytes / 1024} KiB`;
+  return `${bytes} 字节`;
+}
 
 type ItemKind = "doc" | "script";
 
@@ -35,8 +103,6 @@ type ItemMeta = {
 };
 
 const REV_KEY_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/;
-const MAX_BODY = 2 * 1024 * 1024;
-const MAX_REVISIONS = 20;
 
 // Slugs may contain Unicode letters/digits (Chinese titles are common), but must
 // never be able to escape the `docs/` prefix or smuggle a path separator.
@@ -173,15 +239,21 @@ async function readRaw(
   return { text: await obj.text(), obj };
 }
 
-async function pruneRevisions(bucket: R2Bucket, slug: string) {
+async function pruneRevisions(bucket: R2Bucket, slug: string, maxRevisions: number) {
   const listed = await bucket.list({ prefix: revPrefix(slug) });
   const keys = listed.objects.map((o) => o.key).sort();
-  const excess = keys.length - MAX_REVISIONS;
+  const excess = keys.length - maxRevisions;
   if (excess <= 0) return;
   await Promise.all(keys.slice(0, excess).map((key) => bucket.delete(key)));
 }
 
-async function snapshotCurrent(bucket: R2Bucket, slug: string, obj: R2ObjectBody, text: string) {
+async function snapshotCurrent(
+  bucket: R2Bucket,
+  slug: string,
+  obj: R2ObjectBody,
+  text: string,
+  maxRevisions: number,
+) {
   const prevMeta = obj.customMetadata ?? {};
   const now = new Date().toISOString();
   const revKey = `${revPrefix(slug)}${now.replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}`;
@@ -195,7 +267,7 @@ async function snapshotCurrent(bucket: R2Bucket, slug: string, obj: R2ObjectBody
       size: String(text.length),
     },
   });
-  await pruneRevisions(bucket, slug);
+  await pruneRevisions(bucket, slug, maxRevisions);
   return revKey;
 }
 
@@ -216,9 +288,8 @@ app.use("/api/*", async (c, next) => {
 
 app.get("/api/ping", (c) => c.json({ ok: true }));
 
-const LIST_PAGE_LIMIT = 5000;
-
 app.get("/api/items", async (c) => {
+  const { listPageLimit } = limitsFromEnv(c.env);
   const items: ItemMeta[] = [];
   let cursor: string | undefined;
   let truncated = false;
@@ -230,22 +301,21 @@ app.get("/api/items", async (c) => {
       cursor,
     });
     for (const obj of listed.objects) {
+      if (items.length >= listPageLimit) {
+        truncated = true;
+        break;
+      }
       items.push(metaFromObject(obj, obj.key.slice("docs/".length)));
     }
     cursor = listed.truncated ? listed.cursor : undefined;
-    if (cursor && items.length >= LIST_PAGE_LIMIT) {
-      truncated = true;
-      break;
-    }
+    if (truncated || !cursor) break;
   } while (cursor);
 
   items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-  return c.json({ items, truncated });
+  return c.json({ items, truncated, limit: listPageLimit });
 });
 
-const GROUP_MOVE_LIMIT = 500;
-
-async function collectGroupItems(bucket: R2Bucket, group: string) {
+async function collectGroupItems(bucket: R2Bucket, group: string, groupMoveLimit: number) {
   const matches: { slug: string; obj: R2Object }[] = [];
   let cursor: string | undefined;
   do {
@@ -258,7 +328,7 @@ async function collectGroupItems(bucket: R2Bucket, group: string) {
       }
     }
     cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor && matches.length <= GROUP_MOVE_LIMIT);
+  } while (cursor && matches.length <= groupMoveLimit);
   return matches;
 }
 
@@ -284,9 +354,10 @@ app.post("/api/groups/rename", async (c) => {
     return jsonError("新分组不能位于被重命名的分组内部", 400);
   }
 
-  const matches = await collectGroupItems(c.env.BUCKET, from.value);
-  if (matches.length > GROUP_MOVE_LIMIT) {
-    return jsonError(`该分组下条目超过 ${GROUP_MOVE_LIMIT} 条，请分开重命名`, 413);
+  const { groupMoveLimit } = limitsFromEnv(c.env);
+  const matches = await collectGroupItems(c.env.BUCKET, from.value, groupMoveLimit);
+  if (matches.length > groupMoveLimit) {
+    return jsonError(`该分组下条目超过 ${groupMoveLimit} 条，请分开重命名`, 413);
   }
 
   let moved = 0;
@@ -341,7 +412,10 @@ app.put("/api/items/:slug", async (c) => {
 
   if (typeof body.content !== "string") return jsonError("content 必须是字符串", 400);
   const content = body.content;
-  if (content.length > MAX_BODY) return jsonError("内容超过 2 MiB 限制", 413);
+  const { maxBody, maxRevisions } = limitsFromEnv(c.env);
+  if (content.length > maxBody) {
+    return jsonError(`内容超过 ${formatLimit(maxBody)} 限制`, 413);
+  }
 
   // Omitted fields keep their previous value; an explicit empty value clears them.
   const groupInput =
@@ -415,7 +489,7 @@ app.put("/api/items/:slug", async (c) => {
   // save (etag conflict) can never leave behind a duplicate revision entry.
   if (existing && prevText !== content) {
     try {
-      await snapshotCurrent(c.env.BUCKET, slug, existing, prevText);
+      await snapshotCurrent(c.env.BUCKET, slug, existing, prevText, maxRevisions);
     } catch {
       // Losing a snapshot must not fail a save that already landed.
     }
@@ -586,7 +660,9 @@ app.post("/api/items/:slug/revisions/:key/restore", async (c) => {
   if (!written) return jsonError("条目刚被修改，请刷新后再恢复", 409);
 
   // Snapshot only after the restore lands, so a failed restore leaves no stray revision.
-  if (currentText !== text) await snapshotCurrent(c.env.BUCKET, slug, current, currentText);
+  if (currentText !== text) {
+    await snapshotCurrent(c.env.BUCKET, slug, current, currentText, limitsFromEnv(c.env).maxRevisions);
+  }
 
   return c.json({ ok: true, restored: revKey });
 });
@@ -610,8 +686,8 @@ function downloadResponse(
       "content-disposition": `${opts.inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(opts.filename)}`,
       "cache-control": "public, max-age=60",
       // Consumers such as deploy scripts can branch on taxonomy without a second API call.
-      "x-cfnode-group": encodeURIComponent(opts.group ?? ""),
-      "x-cfnode-tags": encodeURIComponent((opts.tags ?? []).join(",")),
+      "x-textlibrary-group": encodeURIComponent(opts.group ?? ""),
+      "x-textlibrary-tags": encodeURIComponent((opts.tags ?? []).join(",")),
       ...(opts.etag ? { etag: opts.etag } : {}),
       ...(opts.updatedAt ? { "last-modified": new Date(opts.updatedAt).toUTCString() } : {}),
     },
@@ -661,7 +737,7 @@ app.get("/s/:path", async (c) => {
   if (share.passwordHash) {
     // The password travels in the URL so a shared link works without a prompt;
     // the header is accepted too for plain `curl -H`.
-    const supplied = c.req.query("p") ?? c.req.header("x-cfnode-password") ?? "";
+    const supplied = c.req.query("p") ?? c.req.header("x-textlibrary-password") ?? "";
     const candidate = await hashPassword(supplied, share.passwordSalt);
     if (!supplied || !timingSafeEqual(candidate, share.passwordHash)) {
       return c.text("密码错误或未提供。请在链接后加 ?p=密码 再试。", 401);

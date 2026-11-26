@@ -15,7 +15,7 @@ import {
  * creator's browser keeps the plaintext to rebuild the full link later. This is
  * the same trust boundary as the admin token already in localStorage.
  */
-const passwordKey = (path: string) => `cfnode.sharepw.${path}`;
+const passwordKey = (path: string) => `textlibrary.sharepw.${path}`;
 
 function rememberPassword(path: string, password: string) {
   if (password) localStorage.setItem(passwordKey(path), password);

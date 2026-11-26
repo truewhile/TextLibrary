@@ -1,7 +1,7 @@
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "cfnode.theme";
+export const THEME_STORAGE_KEY = "textlibrary.theme";
 
 export const THEME_OPTIONS: { id: ThemePreference; label: string; title: string; icon: string }[] = [
   { id: "light", label: "日间", title: "日间模式", icon: "☀" },
