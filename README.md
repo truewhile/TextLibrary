@@ -10,7 +10,7 @@
 - **多标签 + 组合筛选**：每个条目最多 8 个标签；侧栏标签条可多选，多个标签按「同时满足」交集过滤，标签或分组都参与搜索。
 - **公开下载链接**：`GET /d/<slug>` 直接返回文件（`attachment`，带正确扩展名与 MIME），不需要令牌；加 `?inline=1` 改为内联预览；响应头 `X-Textlibrary-Group` / `X-Textlibrary-Tags` 暴露分组与标签。
 - **自定义分享链接**：每个条目可额外生成多条 `/s/<自定义路径>` 别名，可自定义另存文件名，可选设置密码（密码拼在链接里，如 `/s/team-deploy?p=密码`），可随时删除；不影响原有的 `/d/<slug>`。
-- **在线编辑**：CodeMirror 6，支持 Markdown / JavaScript / TypeScript / JSON / YAML / Shell / Python / PowerShell 高亮；Markdown 提供编辑 / 分栏 / 预览三种视图。
+- **在线编辑**：CodeMirror 6，支持 Markdown / JavaScript / TypeScript / JSON / YAML / Shell / Python / PowerShell 高亮，带缩进参考线（含当前块高亮）；Markdown 提供编辑 / 分栏 / 预览三种视图。
 - **历史版本**：每次保存自动快照上一版，可在抽屉里查看、下载单个版本、一键恢复；恢复前会先把当前内容也存成快照，默认保留最近 20 个版本（`MAX_REVISIONS` 可调）。
 - **乐观并发控制**：基于 R2 etag，多标签页同时改同一条目不会被静默覆盖。
 - **Bearer 令牌保护**：所有 `/api/*` 需要 `Authorization: Bearer <ADMIN_TOKEN>`，比较使用常量时间实现。

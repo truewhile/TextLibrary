@@ -12,6 +12,7 @@ import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { python } from "@codemirror/legacy-modes/mode/python";
 import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import type { ItemKind } from "./api";
 import type { ResolvedTheme } from "./theme";
 import { syntaxHighlightingFor } from "./syntax-highlight";
@@ -88,6 +89,42 @@ function languageExtension(kind: ItemKind, lang: string): Extension {
   return languageFor(lang) ?? (kind === "doc" ? markdownSupport() : []);
 }
 
+/**
+ * Indentation guides, one column per indent unit, shared by every editor view.
+ *
+ * `indentationMarkers` emits a style module per call, and CodeMirror never
+ * removes those modules. Calling it once per theme therefore left two modules
+ * fighting over the same light/dark selector, and whichever was inserted last
+ * won in both themes — which silently reverted the light palette to the
+ * library's near-white default. Registering a single instance with both
+ * palettes lets the editor's own light/dark class pick the right one.
+ *
+ * Colours are tuned per theme: on the dark surface `--line-strong`-level greys
+ * read as guides without competing with tokens, while the light surface needs a
+ * deeper tone than `--line` or the 1px line vanishes against white. The active
+ * column is only slightly brighter so the current block reads as a highlight
+ * rather than a second accent colour.
+ *
+ * The plugin paints its gradient on a `z-index: -1` pseudo-element, so on the
+ * cursor's line the active-line tint covers it. Lifting that layer to `z-index:
+ * 0` re-draws the guides on top of the tint; they only occupy whitespace, so the
+ * 1px lines never cross a glyph.
+ */
+const indentGuides: Extension = [
+  indentationMarkers({
+    thickness: 1,
+    colors: {
+      light: "#c6d0df",
+      dark: "#3b4557",
+      activeLight: "#93a5bf",
+      activeDark: "#6d80a1",
+    },
+  }),
+  EditorView.theme({
+    ".cm-line.cm-activeLine.cm-indent-markers::before": { zIndex: "0" },
+  }),
+];
+
 export function editorThemeExtension(theme: ResolvedTheme): Extension {
   if (theme === "dark") {
     return [
@@ -101,6 +138,7 @@ export function editorThemeExtension(theme: ResolvedTheme): Extension {
         ".cm-selectionMatch": { backgroundColor: "rgba(77, 141, 255, 0.18)" },
       }),
       syntaxHighlightingFor("dark"),
+      indentGuides,
     ];
   }
   return [
@@ -121,6 +159,7 @@ export function editorThemeExtension(theme: ResolvedTheme): Extension {
       ".cm-selectionMatch": { backgroundColor: "rgba(59, 122, 239, 0.14)" },
     }),
     syntaxHighlightingFor("light"),
+    indentGuides,
   ];
 }
 
