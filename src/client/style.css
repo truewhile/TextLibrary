@@ -1213,6 +1213,56 @@ input.field::placeholder {
   display: none !important;
 }
 
+/* Revision diff */
+
+.modal.modal-wide {
+  width: min(1080px, 100%);
+}
+
+.diff-host {
+  max-height: min(64vh, 620px);
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-panel);
+}
+
+.diff-host .cm-editor {
+  font-size: 12.5px;
+}
+
+.diff-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+.diff-host .cm-scroller {
+  font-family: var(--mono);
+  line-height: 1.6;
+}
+
+.diff-host .cm-gutters {
+  background: transparent;
+  border-right: 1px solid var(--line);
+}
+
+.diff-host .cm-mergeView,
+.diff-host .cm-mergeViewEditors {
+  height: 100%;
+}
+
+.diff-host .cm-mergeViewEditor + .cm-mergeViewEditor {
+  border-left: 1px solid var(--line-strong);
+}
+
+.diff-fallback {
+  padding: 18px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Share dialog */
 
 .share-modal {

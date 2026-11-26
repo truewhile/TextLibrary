@@ -7,6 +7,7 @@ import { allGroupPaths, buildSections, collectTags, filterItems, isSectionHidden
 import { normalizeGroup } from "../shared/taxonomy";
 import { openShareDialog as showShareDialog } from "./share-dialog";
 import { isMarkdownLang, MD_VIEW_MODES, renderMarkdown, type MdViewMode } from "./md-preview";
+import { diffLayout } from "./diff-layout";
 import {
   THEME_OPTIONS,
   getResolvedTheme,
@@ -1063,28 +1064,70 @@ async function openRevisions() {
 async function previewRevision(slug: string, rev: Revision) {
   try {
     const { content } = await api.revision(slug, rev.key);
+    const current = currentValue();
+    const active = state.active;
+    // A revision can only be diffed against the same language it was saved with.
+    const kind: ItemKind = active?.kind ?? "doc";
+    const lang = active?.lang ?? "markdown";
+    const layout = diffLayout();
+
+    let destroyDiff: (() => void) | null = null;
+    let closed = false;
+
+    const diffHost = el("div", { class: "diff-host" });
     const backdrop = el("div", { class: "modal-backdrop" });
-    const pre = el("pre", {
-      style:
-        "margin:0;padding:14px 18px 18px;max-height:56vh;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--text-dim)",
-    }, [content || "（空）"]);
-    const modal = el("div", { class: "modal", style: "width:min(760px,100%)" }, [
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    function close() {
+      closed = true;
+      destroyDiff?.();
+      destroyDiff = null;
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+    }
+
+    const modal = el("div", { class: "modal modal-wide" }, [
       el("div", { class: "modal-head" }, [`快照 ${formatClock(rev.savedAt)}`]),
-      el("div", { class: "modal-desc" }, ["仅预览，只读。"]),
-      pre,
+      el("div", { class: "modal-desc" }, [
+        layout === "split"
+          ? "左侧是该快照，右侧是当前编辑中的内容；只读。"
+          : "红色行是快照中被删改的内容，下方是当前编辑中的内容；只读。",
+      ]),
+      diffHost,
       el("div", { class: "modal-foot" }, [
         el("a", {
           class: "btn btn-sm",
           href: `/v/${encodeURIComponent(slug)}/${encodeURIComponent(rev.key)}`,
         }, ["下载该版本"]),
-        el("button", { class: "btn btn-primary btn-sm", onclick: () => backdrop.remove() }, ["关闭"]),
+        el("button", { class: "btn btn-primary btn-sm", onclick: () => close() }, ["关闭"]),
       ]),
     ]);
     backdrop.append(modal);
     backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) backdrop.remove();
+      if (event.target === backdrop) close();
     });
+    document.addEventListener("keydown", onKey);
     document.body.append(backdrop);
+
+    try {
+      const { mountDiff } = await import("./revision-diff");
+      // The dialog can be dismissed while that import is in flight; mounting
+      // into a detached host would create editor views nothing ever destroys.
+      if (closed) return;
+      destroyDiff = mountDiff(diffHost, {
+        original: content || "",
+        current,
+        kind,
+        lang,
+        theme: getResolvedTheme(),
+        layout,
+      });
+    } catch (error) {
+      diffHost.replaceChildren(
+        el("div", { class: "diff-fallback" }, ["无法渲染对比：" + (error as Error).message]),
+      );
+    }
   } catch (error) {
     toast("读取版本失败：" + (error as Error).message, "err");
   }

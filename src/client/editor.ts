@@ -1,7 +1,7 @@
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, placeholder } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle, foldGutter, foldKeymap, StreamLanguage } from "@codemirror/language";
+import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle, foldGutter, foldKeymap, StreamLanguage, type Language, type LanguageSupport } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from "@codemirror/autocomplete";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -9,6 +9,8 @@ import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { python } from "@codemirror/legacy-modes/mode/python";
+import { yaml as yamlMode } from "@codemirror/legacy-modes/mode/yaml";
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import type { ItemKind } from "./api";
 import type { ResolvedTheme } from "./theme";
@@ -16,32 +18,74 @@ import type { ResolvedTheme } from "./theme";
 const langCompartment = new Compartment();
 const themeCompartment = new Compartment();
 
-function languageExtension(kind: ItemKind, lang: string) {
-  switch (lang) {
-    case "markdown":
-    case "md":
-      return markdown({ base: markdownLanguage, codeLanguages: [] });
-    case "typescript":
-    case "ts":
-      return javascript({ typescript: true });
-    case "javascript":
-    case "js":
-      return javascript();
-    case "json":
-      return json();
-    case "shell":
-    case "sh":
-    case "bash":
-      return StreamLanguage.define(shell);
-    case "python":
-    case "py":
-      return StreamLanguage.define(python);
-    default:
-      return kind === "doc" ? markdown({ base: markdownLanguage, codeLanguages: [] }) : [];
-  }
+/**
+ * Every accepted spelling of a language, mapped to the single canonical key in
+ * `languages`. Keeping the aliases in one table is what lets the editor, the
+ * Markdown fenced-code highlighter and `LANG_EXT` on the worker agree.
+ */
+const LANG_ALIASES: Record<string, string> = {
+  markdown: "markdown",
+  md: "markdown",
+  typescript: "typescript",
+  ts: "typescript",
+  javascript: "javascript",
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  json: "json",
+  jsonc: "json",
+  yaml: "yaml",
+  yml: "yaml",
+  shell: "shell",
+  sh: "shell",
+  bash: "shell",
+  zsh: "shell",
+  python: "python",
+  py: "python",
+  powershell: "powershell",
+  ps1: "powershell",
+  pwsh: "powershell",
+};
+
+/**
+ * Languages are built once at module scope. `StreamLanguage.define` bakes a
+ * parser per call, and the Markdown fence highlighter asks for a language on
+ * every block parse — recreating them there would be both slow and cache-hostile.
+ */
+const languages: Record<string, Language> = {
+  // Plain GFM without fence support, so Markdown-in-Markdown cannot recurse.
+  markdown: markdownLanguage,
+  typescript: javascript({ typescript: true }).language,
+  javascript: javascript().language,
+  json: json().language,
+  yaml: StreamLanguage.define(yamlMode),
+  shell: StreamLanguage.define(shell),
+  python: StreamLanguage.define(python),
+  powershell: StreamLanguage.define(powerShell),
+};
+
+function languageFor(lang: string): Language | null {
+  const canonical = LANG_ALIASES[lang.trim().toLowerCase()];
+  return canonical ? languages[canonical] ?? null : null;
 }
 
-function editorThemeExtension(theme: ResolvedTheme): Extension {
+let markdownSupportCache: LanguageSupport | null = null;
+
+function markdownSupport(): LanguageSupport {
+  return (markdownSupportCache ??= markdown({
+    base: markdownLanguage,
+    codeLanguages: (info) => languageFor(info),
+  }));
+}
+
+function languageExtension(kind: ItemKind, lang: string): Extension {
+  // Editing a Markdown entry uses the fence-aware support; `languages.markdown`
+  // stays the plain grammar and is only ever handed to nested code blocks.
+  if (LANG_ALIASES[lang.trim().toLowerCase()] === "markdown") return markdownSupport();
+  return languageFor(lang) ?? (kind === "doc" ? markdownSupport() : []);
+}
+
+export function editorThemeExtension(theme: ResolvedTheme): Extension {
   if (theme === "dark") {
     return [
       oneDark,
@@ -151,4 +195,22 @@ export function createEditor(
     focus: () => view.focus(),
     destroy: () => view.destroy(),
   };
+}
+
+/** Read-only extensions for one pane of the revision diff; keeps app theming. */
+export function readOnlyExtensions(
+  kind: ItemKind,
+  lang: string,
+  theme: ResolvedTheme,
+): readonly Extension[] {
+  return [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightSpecialChars(),
+    EditorState.readOnly.of(true),
+    EditorView.editable.of(false),
+    EditorView.lineWrapping,
+    editorThemeExtension(theme),
+    languageExtension(kind, lang),
+  ];
 }
