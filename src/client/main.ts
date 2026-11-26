@@ -7,6 +7,7 @@ import { allGroupPaths, buildSections, collectTags, filterItems, isSectionHidden
 import { normalizeGroup } from "../shared/taxonomy";
 import { openShareDialog as showShareDialog } from "./share-dialog";
 import { isMarkdownLang, MD_VIEW_MODES, renderMarkdown, type MdViewMode } from "./md-preview";
+import { formatDocument, formatSupport } from "./format";
 import { diffLayout } from "./diff-layout";
 import {
   THEME_OPTIONS,
@@ -21,6 +22,15 @@ import {
 const DOC_LANGS = ["markdown", "text", "json", "yaml"];
 const SCRIPT_LANGS = ["javascript", "typescript", "shell", "python", "powershell", "text"];
 const MD_VIEW_STORAGE_KEY = "textlibrary.mdViewMode";
+const WRAP_STORAGE_KEY = "textlibrary.wrapMode";
+
+/** `wrap` soft-wraps long lines; `scroll` lets them overflow and pans at the bottom. */
+type WrapMode = "wrap" | "scroll";
+
+const WRAP_MODES: { id: WrapMode; label: string; title: string }[] = [
+  { id: "wrap", label: "换行", title: "超长行自动换行，全部内容一眼可见" },
+  { id: "scroll", label: "横滑", title: "超长行不换行，溢出部分用底部横向滚动条查看" },
+];
 
 initTheme();
 
@@ -69,6 +79,7 @@ let kindSelect: HTMLSelectElement | null = null;
 let langSelect: HTMLSelectElement | null = null;
 let statusHost: HTMLElement | null = null;
 let saveBtn: HTMLButtonElement | null = null;
+let formatBtn: HTMLButtonElement | null = null;
 let downloadBtn: HTMLAnchorElement | null = null;
 let shareBtn: HTMLButtonElement | null = null;
 let groupPicker: GroupPickerHandle | null = null;
@@ -77,9 +88,23 @@ let tagFilterHost: HTMLElement | null = null;
 let metaRow: HTMLElement | null = null;
 let searchInput: HTMLInputElement | null = null;
 let viewModeHost: HTMLElement | null = null;
+let wrapHost: HTMLElement | null = null;
 let previewHost: HTMLElement | null = null;
 let editorWrap: HTMLElement | null = null;
 let mdViewMode: MdViewMode = loadMdViewMode();
+let wrapMode: WrapMode = loadWrapMode();
+/** Guards the format button against a second click while a format is running. */
+let formatting = false;
+
+function loadWrapMode(): WrapMode {
+  const saved = localStorage.getItem(WRAP_STORAGE_KEY);
+  return saved === "scroll" ? "scroll" : "wrap";
+}
+
+function saveWrapMode(mode: WrapMode) {
+  wrapMode = mode;
+  localStorage.setItem(WRAP_STORAGE_KEY, mode);
+}
 
 function loadMdViewMode(): MdViewMode {
   const saved = localStorage.getItem(MD_VIEW_STORAGE_KEY);
@@ -254,6 +279,7 @@ function renderShell() {
     markDirty();
     updateDownloadHref();
     syncMdViewUi();
+    syncFormatButton();
   });
 
   langSelect.addEventListener("change", () => {
@@ -262,6 +288,7 @@ function renderShell() {
     markDirty();
     updateDownloadHref();
     syncMdViewUi();
+    syncFormatButton();
   });
 
   groupPicker = createGroupPicker("");
@@ -300,6 +327,11 @@ function renderShell() {
 
   tagFilterHost = el("div", { class: "tag-filter" });
 
+  formatBtn = el("button", {
+    class: "btn",
+    title: "格式化整个文档",
+    onclick: () => void runFormat(),
+  }, ["格式化"]);
   saveBtn = el("button", { class: "btn btn-primary", onclick: () => void save() }, ["保存"]);
   const revBtn = el("button", { class: "btn", onclick: () => void openRevisions() }, ["历史版本"]);
   downloadBtn = el("a", { class: "btn" }, ["下载"]);
@@ -323,6 +355,11 @@ function renderShell() {
     class: "view-mode-toggle hidden",
     role: "radiogroup",
     ariaLabel: "Markdown 视图",
+  });
+  wrapHost = el("div", {
+    class: "view-mode-toggle",
+    role: "radiogroup",
+    ariaLabel: "长行显示方式",
   });
   previewHost = el("div", {
     class: "md-preview",
@@ -361,11 +398,13 @@ function renderShell() {
           titleInput,
           kindSelect,
           langSelect,
+          wrapHost,
           viewModeHost,
           statusHost,
           downloadBtn,
           shareBtn,
           revBtn,
+          formatBtn,
           saveBtn,
           deleteBtn,
           logoutBtn,
@@ -377,12 +416,14 @@ function renderShell() {
   );
 
   renderViewModeToggle();
+  renderWrapToggle();
   setKindOptions(kindSelect, "doc");
   langSelect.replaceChildren(...DOC_LANGS.map((l) => el("option", { value: l }, [l])));
   langSelect.value = "markdown";
   setEnabled(false);
   syncTopbar();
   syncMdViewUi();
+  applyWrapMode();
   renderList();
 }
 
@@ -404,6 +445,45 @@ function renderViewModeToggle() {
       ),
     ),
   );
+}
+
+function renderWrapToggle() {
+  if (!wrapHost) return;
+  wrapHost.replaceChildren(
+    ...WRAP_MODES.map((mode) =>
+      el(
+        "button",
+        {
+          type: "button",
+          class: `view-mode-btn${wrapMode === mode.id ? " active" : ""}`,
+          role: "radio",
+          ariaChecked: wrapMode === mode.id ? "true" : "false",
+          title: mode.title,
+          onclick: () => setWrapMode(mode.id),
+        },
+        [mode.label],
+      ),
+    ),
+  );
+}
+
+/**
+ * Long-line behaviour is one reader preference shared by every pane: the editor
+ * and the Markdown preview must agree, or a line that wraps in one and scrolls
+ * in the other reads as a rendering bug.
+ */
+function setWrapMode(mode: WrapMode) {
+  if (wrapMode === mode) return;
+  saveWrapMode(mode);
+  renderWrapToggle();
+  applyWrapMode();
+  if (mode === "wrap") queueMicrotask(() => editor?.focus());
+}
+
+function applyWrapMode() {
+  editor?.setWrap(wrapMode === "wrap");
+  if (editorWrap) editorWrap.classList.toggle("is-scroll-x", wrapMode === "scroll");
+  if (previewHost) previewHost.classList.toggle("is-scroll-x", wrapMode === "scroll");
 }
 
 function setMdViewMode(mode: MdViewMode) {
@@ -458,6 +538,21 @@ function setEnabled(enabled: boolean) {
   groupPicker?.setDisabled(!enabled);
   tagEditor?.setDisabled(!enabled);
   metaRow?.classList.toggle("is-disabled", !enabled);
+  syncFormatButton();
+}
+
+/**
+ * Label the format button with the formatter that a click would run, and keep
+ * it in place but disabled for languages without one — hiding it would make the
+ * toolbar reflow every time the language changes.
+ */
+function syncFormatButton() {
+  if (!formatBtn) return;
+  const label = formatSupport(langSelect?.value);
+  formatBtn.disabled = !label || !state.active || formatting;
+  formatBtn.title = label
+    ? `用 ${label} 格式化整个文档`
+    : "当前语言没有可用的格式化器";
 }
 
 function setKindOptions(select: HTMLSelectElement, kind: ItemKind) {
@@ -679,6 +774,7 @@ function syncTopbar() {
   if (shareBtn) shareBtn.classList.toggle("hidden", !active || state.draft);
   renderStatus();
   syncMdViewUi();
+  syncFormatButton();
 }
 
 function renderStatus() {
@@ -801,7 +897,7 @@ function createEditorFor(content: string, kind: ItemKind, lang: string) {
   disposeEditor();
   const handle = createEditor(
     host,
-    { content, kind, lang, theme: getResolvedTheme() },
+    { content, kind, lang, theme: getResolvedTheme(), wrap: wrapMode === "wrap" },
     () => {
       markDirty();
       refreshPreview();
@@ -809,6 +905,7 @@ function createEditorFor(content: string, kind: ItemKind, lang: string) {
   );
   editor = handle;
   syncMdViewUi();
+  applyWrapMode();
   if (mdViewMode !== "preview" || !isMarkdownLang(lang)) handle.focus();
 }
 
@@ -934,6 +1031,52 @@ async function save(): Promise<boolean> {
       toast("保存失败：" + (error as Error).message, "err");
     }
     return false;
+  }
+}
+
+/* --------------------------------- format -------------------------------- */
+
+/**
+ * Format the whole document in place.
+ *
+ * The result replaces the buffer as a single CodeMirror transaction, which is
+ * what keeps undo working: one Ctrl+Z returns the file to its unformatted text
+ * rather than replaying the edit token by token.
+ *
+ * Formatting deliberately does not save. It marks the document dirty like any
+ * other edit, so the reader can review the result and undo it before committing.
+ */
+async function runFormat() {
+  if (formatting) return;
+  const lang = langSelect?.value ?? "";
+  if (!state.active || !editor) return;
+
+  const before = currentValue();
+  const target = editor;
+  formatting = true;
+  syncFormatButton();
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    const formatted = await formatDocument(lang, before);
+    if (formatted === before) {
+      toast("已经是格式化后的样子", "ok");
+      return;
+    }
+    // The formatter's chunks take a moment to download on first use, and the
+    // reader can switch items in that window. Writing into the old handle would
+    // either throw (disposed view) or, worse, format the wrong document.
+    if (editor !== target) return;
+    target.setValue(formatted);
+    markDirty();
+    refreshPreview();
+    toast(`已格式化 ${formatSupport(lang) ?? ""}`.trim(), "ok");
+  } catch (error) {
+    toast("格式化失败：" + (error as Error).message, "err");
+  } finally {
+    formatting = false;
+    syncFormatButton();
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 
@@ -1122,6 +1265,7 @@ async function previewRevision(slug: string, rev: Revision) {
         lang,
         theme: getResolvedTheme(),
         layout,
+        wrap: wrapMode === "wrap",
       });
     } catch (error) {
       diffHost.replaceChildren(

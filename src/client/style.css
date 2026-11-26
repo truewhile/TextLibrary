@@ -697,7 +697,9 @@ input.field::placeholder {
   border-bottom: 1px solid var(--line);
   background: var(--surface-topbar);
   backdrop-filter: blur(14px);
-  flex-wrap: nowrap;
+  /* Wrap rather than clip: the action buttons never shrink, so on a narrower
+     window `nowrap` pushed the trailing ones (保存/删除/退出) off-screen. */
+  flex-wrap: wrap;
 }
 
 .topbar > .btn,
@@ -905,6 +907,101 @@ input.field::placeholder {
   font-family: var(--mono);
   line-height: 1.65;
   padding: 8px 0 40vh;
+}
+
+/* ---------- Long-line display (wrap vs. horizontal pan) ---------- */
+
+/*
+ * In horizontal mode the overflow is the point, so the scrollbar is pinned
+ * visible (`scroll`) instead of appearing on demand: a bar that only shows up
+ * once the reader hits the edge is undiscoverable, and it doubles as the
+ * affordance for dragging a long line into view.
+ */
+.editor-wrap.is-scroll-x .cm-host .cm-scroller {
+  overflow-x: scroll;
+  overscroll-behavior-x: contain;
+}
+
+.md-preview.is-scroll-x {
+  overflow-x: scroll;
+  overscroll-behavior-x: contain;
+}
+
+/* Nothing may silently wrap in horizontal mode, or the content never grows
+   wider than the pane and the scrollbar would stay inert. */
+.md-preview.is-scroll-x p,
+.md-preview.is-scroll-x li,
+.md-preview.is-scroll-x h1,
+.md-preview.is-scroll-x h2,
+.md-preview.is-scroll-x h3,
+.md-preview.is-scroll-x h4,
+.md-preview.is-scroll-x h5,
+.md-preview.is-scroll-x h6,
+.md-preview.is-scroll-x blockquote,
+.md-preview.is-scroll-x td,
+.md-preview.is-scroll-x th {
+  white-space: pre;
+}
+
+.md-preview.is-scroll-x table {
+  width: auto;
+  min-width: 100%;
+}
+
+/* Code fences scroll with the pane instead of trapping a second scrollbar
+   inside the block the reader is already trying to pan. Sizing the block to its
+   content is what makes it count as scrollable overflow on the pane: an
+   `overflow: visible` child's overflowing glyphs alone are clipped, not counted,
+   so the pane's scrollbar would stay inert. */
+.md-preview.is-scroll-x pre {
+  overflow-x: visible;
+  width: max-content;
+  min-width: 100%;
+}
+
+.md-preview a,
+.md-preview code {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Wrap mode must actually break tokens with no spaces (URLs, hashes, long
+   identifiers); otherwise the one line everyone complains about is exactly the
+   line that still refuses to wrap. */
+.md-preview:not(.is-scroll-x) :is(p, li, blockquote, a, td, th) {
+  overflow-wrap: anywhere;
+}
+
+/* A grabbable bar rather than the OS overlay thumb, so the horizontal mode is
+   visible in both themes and on both platforms. */
+.cm-host .cm-scroller::-webkit-scrollbar,
+.md-preview::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+.cm-host .cm-scroller::-webkit-scrollbar-track,
+.md-preview::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cm-host .cm-scroller::-webkit-scrollbar-thumb,
+.md-preview::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  background-color: var(--text-faint);
+}
+
+.cm-host .cm-scroller::-webkit-scrollbar-thumb:hover,
+.md-preview::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-dim);
+}
+
+.cm-host .cm-scroller,
+.md-preview {
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-faint) transparent;
 }
 
 .cm-host .cm-gutters {

@@ -19,6 +19,17 @@ import { syntaxHighlightingFor } from "./syntax-highlight";
 
 const langCompartment = new Compartment();
 const themeCompartment = new Compartment();
+const wrapCompartment = new Compartment();
+
+/**
+ * Wrapping is a reader preference, not a document property, so it lives in its
+ * own compartment: switching it must not disturb the language or theme state.
+ * Turning it off leaves every line at its natural width, which is what makes the
+ * editor overflow horizontally and become pannable with the bottom scrollbar.
+ */
+function wrapExtension(wrap: boolean): Extension {
+  return wrap ? EditorView.lineWrapping : [];
+}
 
 /**
  * Every accepted spelling of a language, mapped to the single canonical key in
@@ -68,8 +79,18 @@ const languages: Record<string, Language> = {
   powershell: StreamLanguage.define(powerShell),
 };
 
+/**
+ * The canonical language key for any accepted spelling, or `null` when the
+ * string is not a language this app knows. Exported so features that dispatch
+ * on language (formatting) honour the same aliases as the editor.
+ */
+export function canonicalLang(lang: string | null | undefined): string | null {
+  if (!lang) return null;
+  return LANG_ALIASES[lang.trim().toLowerCase()] ?? null;
+}
+
 function languageFor(lang: string): Language | null {
-  const canonical = LANG_ALIASES[lang.trim().toLowerCase()];
+  const canonical = canonicalLang(lang);
   return canonical ? languages[canonical] ?? null : null;
 }
 
@@ -85,7 +106,7 @@ function markdownSupport(): LanguageSupport {
 function languageExtension(kind: ItemKind, lang: string): Extension {
   // Editing a Markdown entry uses the fence-aware support; `languages.markdown`
   // stays the plain grammar and is only ever handed to nested code blocks.
-  if (LANG_ALIASES[lang.trim().toLowerCase()] === "markdown") return markdownSupport();
+  if (canonicalLang(lang) === "markdown") return markdownSupport();
   return languageFor(lang) ?? (kind === "doc" ? markdownSupport() : []);
 }
 
@@ -169,16 +190,24 @@ export type EditorHandle = {
   setValue: (value: string) => void;
   setMode: (kind: ItemKind, lang: string) => void;
   setTheme: (theme: ResolvedTheme) => void;
+  setWrap: (wrap: boolean) => void;
   focus: () => void;
   destroy: () => void;
 };
 
 export function createEditor(
   parent: HTMLElement,
-  initial: { content: string; kind: ItemKind; lang: string; theme?: ResolvedTheme },
+  initial: {
+    content: string;
+    kind: ItemKind;
+    lang: string;
+    theme?: ResolvedTheme;
+    wrap?: boolean;
+  },
   onChange: () => void,
 ): EditorHandle {
   const theme = initial.theme ?? "dark";
+  const wrap = initial.wrap ?? true;
   const state = EditorState.create({
     doc: initial.content,
     extensions: [
@@ -209,7 +238,7 @@ export function createEditor(
         indentWithTab,
       ]),
       themeCompartment.of(editorThemeExtension(theme)),
-      EditorView.lineWrapping,
+      wrapCompartment.of(wrapExtension(wrap)),
       langCompartment.of(languageExtension(initial.kind, initial.lang)),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) onChange();
@@ -237,6 +266,14 @@ export function createEditor(
         effects: themeCompartment.reconfigure(editorThemeExtension(next)),
       });
     },
+    setWrap: (next) => {
+      view.dispatch({
+        effects: wrapCompartment.reconfigure(wrapExtension(next)),
+      });
+      // Re-measuring keeps the scrollbar extent honest the moment the mode
+      // flips; without it the gutter and horizontal scrollbar can lag a frame.
+      view.requestMeasure();
+    },
     focus: () => view.focus(),
     destroy: () => view.destroy(),
   };
@@ -247,6 +284,7 @@ export function readOnlyExtensions(
   kind: ItemKind,
   lang: string,
   theme: ResolvedTheme,
+  wrap = true,
 ): readonly Extension[] {
   return [
     lineNumbers(),
@@ -254,7 +292,7 @@ export function readOnlyExtensions(
     highlightSpecialChars(),
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
-    EditorView.lineWrapping,
+    wrapExtension(wrap),
     editorThemeExtension(theme),
     languageExtension(kind, lang),
   ];

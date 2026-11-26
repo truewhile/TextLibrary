@@ -15,6 +15,8 @@ export type DiffSpec = {
   lang: string;
   theme: ResolvedTheme;
   layout: DiffLayout;
+  /** Mirror the editor's long-line mode so the comparison reads the same way. */
+  wrap?: boolean;
 };
 
 /**
@@ -24,7 +26,7 @@ export type DiffSpec = {
  * stays out of the initial chunk and the common edit path pays nothing for it.
  */
 export function mountDiff(parent: HTMLElement, spec: DiffSpec): () => void {
-  const extensions = readOnlyExtensions(spec.kind, spec.lang, spec.theme);
+  const extensions = readOnlyExtensions(spec.kind, spec.lang, spec.theme, spec.wrap ?? true);
 
   if (spec.layout === "split") {
     const view = new MergeView({
